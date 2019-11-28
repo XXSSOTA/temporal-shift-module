@@ -25,6 +25,7 @@ best_prec1 = 0
 
 
 def main():
+    print('ccccc')
     global args, best_prec1
     args = parser.parse_args()
 

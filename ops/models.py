@@ -16,7 +16,7 @@ class TSN(nn.Module):
                  consensus_type='avg', before_softmax=True,
                  dropout=0.8, img_feature_dim=256,
                  crop_num=1, partial_bn=True, print_spec=True, pretrain='imagenet',
-                 is_shift=False, shift_div=8, shift_place='blockres', fc_lr5=False,
+                 is_shift=True, shift_div=8, shift_place='blockres', fc_lr5=False,
                  temporal_pool=False, non_local=False):
         super(TSN, self).__init__()
         self.modality = modality
@@ -54,7 +54,8 @@ class TSN(nn.Module):
         consensus_module:   {}
         dropout_ratio:      {}
         img_feature_dim:    {}
-            """.format(base_model, self.modality, self.num_segments, self.new_length, consensus_type, self.dropout, self.img_feature_dim)))
+            """.format(base_model, self.modality, self.num_segments, self.new_length, consensus_type, self.dropout,
+                       self.img_feature_dim)))
 
         self._prepare_base_model(base_model)
 
@@ -141,8 +142,8 @@ class TSN(nn.Module):
                 from ops.temporal_shift import TemporalShift
                 for m in self.base_model.modules():
                     if isinstance(m, InvertedResidual) and len(m.conv) == 8 and m.use_res_connect:
-                        if self.print_spec:
-                            print('Adding temporal shift... {}'.format(m.use_res_connect))
+                        # if self.print_spec:
+                        #     print('Adding temporal shift... {}'.format(m.use_res_connect))
                         m.conv[0] = TemporalShift(m.conv[0], n_segment=self.num_segments, n_div=self.shift_div)
             if self.modality == 'Flow':
                 self.input_mean = [0.5]
@@ -166,6 +167,30 @@ class TSN(nn.Module):
                 print('Adding temporal shift...')
                 self.base_model.build_temporal_ops(
                     self.num_segments, is_temporal_shift=self.shift_place, shift_div=self.shift_div)
+        elif base_model == 'efficientnet':
+            from archs.efficientnet_pytorch import EfficientNet, MBConvBlock
+            self.base_model = EfficientNet.from_name('efficientnet-b5')
+
+            self.base_model.last_layer_name = '_fc'
+            self.input_size = 224
+            self.input_mean = [0.485, 0.456, 0.406]
+            self.input_std = [0.229, 0.224, 0.225]
+
+            # self.base_model.avgpool = nn.AdaptiveAvgPool2d(1)
+            from ops.temporal_shift import TemporalShift
+
+            # mm = self.base_model._blocks.modules().insert(0,TemporalShift)
+            # print(type(mm))
+            i = 0
+            add_tsm = [3, 6, 9, 12, 16, 20, 32, 36]
+            for m in self.base_model._blocks.modules():
+                if isinstance(m, MBConvBlock):
+                    i += 1
+                    if i in add_tsm:
+                        print(i)
+                        print(type(m))
+                        m = TemporalShift(m, n_segment=self.num_segments, n_div=self.shift_div)
+
         else:
             raise ValueError('Unknown base model: {}'.format(base_model))
 
@@ -314,7 +339,7 @@ class TSN(nn.Module):
         # modify parameters, assume the first blob contains the convolution kernels
         params = [x.clone() for x in conv_layer.parameters()]
         kernel_size = params[0].size()
-        new_kernel_size = kernel_size[:1] + (2 * self.new_length, ) + kernel_size[2:]
+        new_kernel_size = kernel_size[:1] + (2 * self.new_length,) + kernel_size[2:]
         new_kernels = params[0].data.mean(dim=1, keepdim=True).expand(new_kernel_size).contiguous()
 
         new_conv = nn.Conv2d(2 * self.new_length, conv_layer.out_channels,
@@ -322,8 +347,8 @@ class TSN(nn.Module):
                              bias=True if len(params) == 2 else False)
         new_conv.weight.data = new_kernels
         if len(params) == 2:
-            new_conv.bias.data = params[1].data # add bias if neccessary
-        layer_name = list(container.state_dict().keys())[0][:-7] # remove .weight suffix to get the layer name
+            new_conv.bias.data = params[1].data  # add bias if neccessary
+        layer_name = list(container.state_dict().keys())[0][:-7]  # remove .weight suffix to get the layer name
 
         # replace the first convlution layer
         setattr(container, layer_name, new_conv)
@@ -354,8 +379,9 @@ class TSN(nn.Module):
             new_kernels = params[0].data.mean(dim=1, keepdim=True).expand(new_kernel_size).contiguous()
         else:
             new_kernel_size = kernel_size[:1] + (3 * self.new_length,) + kernel_size[2:]
-            new_kernels = torch.cat((params[0].data, params[0].data.mean(dim=1, keepdim=True).expand(new_kernel_size).contiguous()),
-                                    1)
+            new_kernels = torch.cat(
+                (params[0].data, params[0].data.mean(dim=1, keepdim=True).expand(new_kernel_size).contiguous()),
+                1)
             new_kernel_size = kernel_size[:1] + (3 + 3 * self.new_length,) + kernel_size[2:]
 
         new_conv = nn.Conv2d(new_kernel_size[1], conv_layer.out_channels,

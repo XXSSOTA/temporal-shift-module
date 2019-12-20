@@ -169,7 +169,8 @@ class TSN(nn.Module):
                     self.num_segments, is_temporal_shift=self.shift_place, shift_div=self.shift_div)
         elif base_model == 'efficientnet':
             from archs.efficientnet_pytorch import EfficientNet, MBConvBlock
-            self.base_model = EfficientNet.from_name('efficientnet-b5')
+            # self.base_model = EfficientNet.from_name('efficientnet-b5')
+            self.base_model = EfficientNet.from_pretrained('efficientnet-b5')
 
             self.base_model.last_layer_name = '_fc'
             self.input_size = 224
